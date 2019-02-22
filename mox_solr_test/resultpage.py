@@ -1,5 +1,5 @@
-from mox_solr_test.frontpage import searchfield as _field
 from mox_solr_test.config import settings
+from pprint import pformat
 
 
 page="""<html>
@@ -7,7 +7,12 @@ page="""<html>
 <meta charset="utf-8">
 </head>
 <body><a href="/">forfra</a>
-{searchfield}<br>
+<table border=2>
+<tr><th>query</th><th>query sent to solr-url</th></tr>
+<tr><td><pre>{orgparams}</pre></td><td><pre>{expparams}</pre></td></tr>
+<tr><td colspan=2>Solr-url: {solrurl}</td></tr>
+</table>
+<p>
 {result_table}
 </body>
 </html>"""
@@ -33,13 +38,15 @@ def table(rows):
     return "<table>{rows}</table>".format(rows=rows)
 
 
-def render(q, result):
+def render(orgparams, expparams, result, solrurl):
     #import pdb; pdb.set_trace()
     _rows = rows(result["response"]["docs"])
     _table = table(_rows)
     return page.format(
-        searchfield=_field(q),
-        result_table=_table
+        orgparams=pformat(dict(orgparams)),
+        expparams=pformat(dict(expparams)),
+        solrurl=solrurl,
+        result_table=_table,
     )
 
 

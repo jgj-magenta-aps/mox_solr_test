@@ -2,60 +2,46 @@ import flask
 import requests
 from flask import Flask
 from mox_solr_test.config import settings
-from mox_solr_test import frontpage, resultpage
+from mox_solr_test import queries, frontpage, resultpage, multiqueries
 import re
 
 
 app = Flask(__name__)
 
-OS2MO_UI_URL = settings["OS2MO_SERVICE_URL"].rsplit("/service",maxsplit=1)[0]
-OS2MO={
-    "employee": OS2MO_UI_URL + "/medarbejder/",
-    "orgunit": OS2MO_UI_URL + "/organisation/" 
-}
-FIELDS = {
-    "employee": [x["name"] for x in requests.get(settings["SOLR_URL"] + "/solr/os2mo-employee/schema/fields").json()['fields']],
-    "orgunit": [x["name"] for x in requests.get(settings["SOLR_URL"] + "/solr/os2mo-orgunit/schema/fields").json()['fields']]
-}
-
-
-def lucenequery(solrpath, params):
-    return requests.get(solrpath, params=params).json()
-    
-
-def dismaxquery(solrpath, params, fields):
-    params = dict(params)
-    queryfields = []
-    for f in params["qf"].split(" "):
-        for qf in fields:
-            if re.match(f, qf):
-                queryfields.append(qf)
-    params["hl.fl"]  = params["qf"] = " ".join(queryfields)
-    params["hl.requireFieldMatch"]  = "true"
-    #print(params)
-    return requests.get(solrpath, params=params).json()
-
 
 @app.route('/')
-def solr_test():
+def solr_test_single():
+    """ single query - only goes so far - and there is no apparent way to make joins
+    """
     if flask.request.args.get("q"):
-        q = flask.request.args["q"]
+
+        # we have two collections (employee/orgunit - must be in in args)
+        # both solrpath and path to document in os2mo depends on that
         collection = flask.request.args.get("collection")
-        os2mo = OS2MO[collection]
-        solrpath = settings["SOLR_URL"] + "/solr/os2mo-" + collection + "/select"
+        os2mo = queries.OS2MO[collection]
+        solrurl = settings["SOLR_URL"] + "/solr/os2mo-" + collection + "/select" 
+
         if flask.request.args.get("defType","") == "dismax":
-            result = dismaxquery(solrpath, flask.request.args, FIELDS[collection])
+            # for searching multiple fields without 'catch-all/copy fields'
+            # we need a dismax-query with 'qf': query-fields.
+            # see dismaxquery example above on how to have field-wildcards
+            result, params = queries.dismaxquery(collection, flask.request.args, FIELDS[collection])
         else:
-            result = lucenequery(solrpath, flask.request.args)
-        for i in result.get("response",{}).get("docs",[]):
-            i["_type"] = collection
-            i["_href"] = os2mo + (i["uuid"][0])
-            i["_hl"] = result.get("highlighting",{}).get(i["uuid"][0],{})
-        return resultpage.render(q, result)
+            # a normal one-field-query is a lucene-query
+            result, params = queries.lucenequery(collection, flask.request.args)
+        return resultpage.render(flask.request.args, params, result, solrurl)
     else:
         return frontpage.render()
 
-
+@app.route('/multi/')
+def solr_test_multiple():
+    """ multiple queries
+    """
+    if flask.request.args.get("multiquery"):
+        result, params = multiqueries.multiqueries[flask.request.args.get("multiquery")](flask.request.args)
+        return resultpage.render(flask.request.args, params, result, "")
+    else:
+        return multiqueries.render()
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0")
